@@ -18,7 +18,9 @@ jobs:
       - name: Install builder dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y meson glslang-tools flex bison ninja-build python3-mako python3-yaml pkg-config cmake curl unzip zip
+          sudo apt-get install -y glslang-tools flex bison ninja-build python3-pip python3-mako python3-yaml pkg-config cmake curl unzip zip
+          python3 -m pip install --break-system-packages --upgrade 'meson>=1.4.0'
+          meson --version
       - name: Clone proven A710 builder
         run: git clone --depth=1 https://github.com/Vauzi-17/710.git upstream
       - name: Configure variant
