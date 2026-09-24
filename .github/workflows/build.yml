@@ -26,7 +26,15 @@ jobs:
       - name: Configure variant
         run: |
           cp upstream/turnip_builder.sh ./turnip_builder.sh
+          rm -rf patches
+          cp -a upstream/patches ./patches
           chmod +x turnip_builder.sh
+          echo "MESA_REF=ecf5201fb90412dbfa2f0886597e849bcf703005" >> "$GITHUB_ENV"
+          echo "BUILD_VARIANTS=base" >> "$GITHUB_ENV"
+          echo "DRIVER_NAME=RIC Turnip A710" >> "$GITHUB_ENV"
+          echo "DRIVER_DESCRIPTION=iQOO Z9x / Adreno 710 - Eden tuned, SYSMEM-safe baseline" >> "$GITHUB_ENV"
+          echo "DRIVER_AUTHOR=RIC / Vauzi / Mesa" >> "$GITHUB_ENV"
+          echo "ZIP_PREFIX=RIC-Turnip-A710" >> "$GITHUB_ENV"
           case "${{ matrix.variant }}" in
             stable)
               echo "RIC_VARIANT=stable" >> "$GITHUB_ENV"
@@ -42,30 +50,16 @@ jobs:
           esac
       - name: Build using A710 upstream pipeline
         run: BUILD_VERSION=3.9 bash ./turnip_builder.sh
-      - name: Prepare Eden-compatible artifact
+      - name: Collect AdrenoTools ZIP
         run: |
-          set -euo pipefail
-          mkdir -p dist/eden
-          DRIVER_ZIP="$(find . -type f -name '*.zip' -path '*/turnip_workdir/out/*' -print -quit)"
-          test -n "$DRIVER_ZIP"
-          unzip -j "$DRIVER_ZIP" 'libvulkan_freedreno.so' 'meta.json' -d dist/eden
-          test -s dist/eden/libvulkan_freedreno.so
-          test -s dist/eden/meta.json
-          python3 - <<'PY'
-          import json
-          p='dist/eden/meta.json'
-          m=json.load(open(p))
-          required=['name','description','author','vendor','driverVersion','minApi','libraryName']
-          missing=[k for k in required if k not in m]
-          assert not missing, f"Missing Eden metadata: {missing}"
-          assert m['libraryName']=='libvulkan_freedreno.so'
-          print('Eden metadata OK:', m['name'], m['driverVersion'])
-          PY
-          ls -lh dist/eden
+          mkdir -p dist
+          find . -type f -name '*.zip' -not -path './.git/*' -exec cp {} dist/ \;
+          test -n "$(find dist -type f -name '*.zip' -print -quit)"
+          for f in dist/*.zip; do
+            mv "$f" "dist/RIC-${RIC_VARIANT}-$(basename "$f")"
+          done
       - uses: actions/upload-artifact@v4
         with:
-          name: RIC-Turnip-A710-${{ matrix.variant }}-EDEN
-          path: |
-            dist/eden/libvulkan_freedreno.so
-            dist/eden/meta.json
+          name: RIC-Turnip-A710-${{ matrix.variant }}
+          path: dist/*.zip
           if-no-files-found: error
