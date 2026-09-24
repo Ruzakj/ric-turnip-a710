@@ -4,13 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
-    paths:
-      - 'patches/**'
-      - 'scripts/**'
-      - '.github/workflows/build.yml'
-
-permissions:
-  contents: read
+    paths: ['.github/workflows/build.yml']
 
 jobs:
   build:
@@ -21,34 +15,35 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install dependencies
+      - name: Clone proven A710 builder
+        run: git clone --depth=1 https://github.com/Vauzi-17/710.git upstream
+      - name: Configure variant
         run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-pip python3-setuptools python3-mako meson ninja-build             glslang-tools libdrm-dev libexpat1-dev libelf-dev libwayland-dev wayland-protocols             libx11-xcb-dev libxcb-dri3-dev libxcb-present-dev libxcb-randr0-dev libxcb-shm0-dev             libxcb-sync-dev libxcb-xfixes0-dev libxshmfence-dev pkg-config cmake curl unzip zip
-          python3 -m pip install --break-system-packages mako pyyaml
-
-      - name: Install Android NDK
+          cp upstream/turnip_builder.sh ./turnip_builder.sh
+          chmod +x turnip_builder.sh
+          case "${{ matrix.variant }}" in
+            stable)
+              echo "RIC_VARIANT=stable" >> "$GITHUB_ENV"
+              ;;
+            performance)
+              echo "RIC_VARIANT=performance" >> "$GITHUB_ENV"
+              # Keep upstream A710 hardware config; add compiler optimization only.
+              sed -i 's/-Dbuildtype=release/-Dbuildtype=release -Db_lto=true/' turnip_builder.sh || true
+              ;;
+            experimental)
+              echo "RIC_VARIANT=experimental" >> "$GITHUB_ENV"
+              ;;
+          esac
+      - name: Build using A710 upstream pipeline
+        run: bash ./turnip_builder.sh
+      - name: Collect AdrenoTools ZIP
         run: |
-          curl -L -o ndk.zip https://dl.google.com/android/repository/android-ndk-r27c-linux.zip
-          unzip -q ndk.zip
-          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r27c" >> "$GITHUB_ENV"
-
-      - name: Clone Mesa and A710 research baseline
-        run: |
-          git clone --depth=1 https://gitlab.freedesktop.org/mesa/mesa.git mesa
-          git clone --depth=1 https://github.com/Vauzi-17/710.git a710-reference
-          python3 a710-reference/add_710_720_722.py mesa
-
-      - name: Apply variant policy
-        run: bash scripts/apply-variant.sh "${{ matrix.variant }}"
-
-      - name: Build Turnip
-        run: bash scripts/build-turnip.sh "${{ matrix.variant }}"
-
-      - name: Package AdrenoTools driver
-        run: bash scripts/package.sh "${{ matrix.variant }}"
-
+          mkdir -p dist
+          find . -type f -name '*.zip' -not -path './.git/*' -exec cp {} dist/ \;
+          test -n "$(find dist -type f -name '*.zip' -print -quit)"
+          for f in dist/*.zip; do
+            mv "$f" "dist/RIC-${RIC_VARIANT}-$(basename "$f")"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: RIC-Turnip-A710-${{ matrix.variant }}
