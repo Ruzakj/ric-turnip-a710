@@ -35,7 +35,7 @@ jobs:
               ;;
           esac
       - name: Build using A710 upstream pipeline
-        run: bash ./turnip_builder.sh
+        run: BUILD_VERSION=3.9 bash ./turnip_builder.sh
       - name: Collect AdrenoTools ZIP
         run: |
           mkdir -p dist
