@@ -6,6 +6,9 @@ on:
     branches: [ main ]
     paths: ['.github/workflows/build.yml']
 
+permissions:
+  contents: read
+
 jobs:
   build:
     strategy:
@@ -13,53 +16,80 @@ jobs:
       matrix:
         variant: [stable, performance, experimental]
     runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+
       - name: Install builder dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y glslang-tools flex bison ninja-build python3-pip python3-mako python3-yaml pkg-config cmake curl unzip zip
           python3 -m pip install --break-system-packages --upgrade 'meson>=1.4.0'
           meson --version
-      - name: Clone proven A710 builder
-        run: git clone --depth=1 https://github.com/Vauzi-17/710.git upstream
-      - name: Configure variant
+
+      - name: Clone latest A710 builder and patches
         run: |
+          git clone --depth=1 https://github.com/Vauzi-17/710.git upstream
           cp upstream/turnip_builder.sh ./turnip_builder.sh
           rm -rf patches
           cp -a upstream/patches ./patches
           chmod +x turnip_builder.sh
-          echo "MESA_REF=ecf5201fb90412dbfa2f0886597e849bcf703005" >> "$GITHUB_ENV"
-          echo "BUILD_VARIANTS=base" >> "$GITHUB_ENV"
-          echo "DRIVER_NAME=RIC Turnip A710" >> "$GITHUB_ENV"
-          echo "DRIVER_DESCRIPTION=iQOO Z9x / Adreno 710 - Eden tuned, SYSMEM-safe baseline" >> "$GITHUB_ENV"
-          echo "DRIVER_AUTHOR=RIC / Vauzi / Mesa" >> "$GITHUB_ENV"
-          echo "ZIP_PREFIX=RIC-Turnip-A710" >> "$GITHUB_ENV"
+
+      - name: Configure Mesa revision and variant
+        shell: bash
+        run: |
+          # v4.1's Mesa revision is the conservative baseline. Experimental tracks Mesa main.
           case "${{ matrix.variant }}" in
             stable)
+              echo "MESA_REF=e5f0687867f5" >> "$GITHUB_ENV"
               echo "RIC_VARIANT=stable" >> "$GITHUB_ENV"
               ;;
             performance)
+              echo "MESA_REF=e5f0687867f5" >> "$GITHUB_ENV"
               echo "RIC_VARIANT=performance" >> "$GITHUB_ENV"
-              # Keep upstream A710 hardware config; add compiler optimization only.
-              sed -i 's/-Dbuildtype=release/-Dbuildtype=release -Db_lto=true/' turnip_builder.sh || true
               ;;
             experimental)
+              echo "MESA_REF=main" >> "$GITHUB_ENV"
               echo "RIC_VARIANT=experimental" >> "$GITHUB_ENV"
               ;;
           esac
-      - name: Build using A710 upstream pipeline
-        run: BUILD_VERSION=3.9 bash ./turnip_builder.sh
-      - name: Collect AdrenoTools ZIP
+          echo "BUILD_VARIANTS=base" >> "$GITHUB_ENV"
+          echo "DRIVER_NAME=RIC Turnip A710" >> "$GITHUB_ENV"
+          echo "DRIVER_DESCRIPTION=iQOO Z9x / Adreno 710 - Mesa 26.3 baseline, sysmem-oriented" >> "$GITHUB_ENV"
+          echo "DRIVER_AUTHOR=RIC / Vauzi / Mesa" >> "$GITHUB_ENV"
+          echo "ZIP_PREFIX=RIC-Turnip-A710" >> "$GITHUB_ENV"
+
+      - name: Enable LTO for performance variant
+        if: matrix.variant == 'performance'
         run: |
+          # The builder explicitly passes -Db_lto=false; replace that option.
+          grep -q -- '-Db_lto=false' turnip_builder.sh
+          sed -i 's/-Db_lto=false/-Db_lto=true/' turnip_builder.sh
+          grep -n -- '-Db_lto=' turnip_builder.sh
+
+      - name: Build Android AdrenoTools driver
+        env:
+          ANDROID_NDK_HOME: ''
+          NDK_VERSION: android-ndk-r29
+        run: BUILD_VERSION=4.1 bash ./turnip_builder.sh
+
+      - name: Collect and validate AdrenoTools ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p dist
-          find . -type f -name '*.zip' -not -path './.git/*' -exec cp {} dist/ \;
-          test -n "$(find dist -type f -name '*.zip' -print -quit)"
+          find out -type f -name '*.zip' -print -exec cp {} dist/ \;
+          test "$(find dist -maxdepth 1 -type f -name '*.zip' | wc -l)" -ge 1
           for f in dist/*.zip; do
+            unzip -t "$f"
             mv "$f" "dist/RIC-${RIC_VARIANT}-$(basename "$f")"
           done
+          cp out/build-info.env "dist/RIC-${RIC_VARIANT}-build-info.env"
+          cp out/patches-base.txt "dist/RIC-${RIC_VARIANT}-patches.txt"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: RIC-Turnip-A710-${{ matrix.variant }}
-          path: dist/*.zip
+          name: RIC-Turnip-A710-${{ matrix.variant }}-v4.1
+          path: dist/*
           if-no-files-found: error
+          retention-days: 30
