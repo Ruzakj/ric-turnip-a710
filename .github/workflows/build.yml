@@ -41,7 +41,7 @@ jobs:
           # v4.1's Mesa revision is the conservative baseline. Experimental tracks Mesa main.
           case "${{ matrix.variant }}" in
             stable)
-              echo "MESA_REF=e5f0687867f5" >> "$GITHUB_ENV"
+              echo "MESA_REF=ecf5201fb90412dbfa2f0886597e849bcf703005" >> "$GITHUB_ENV"
               echo "RIC_VARIANT=stable" >> "$GITHUB_ENV"
               ;;
             performance)
